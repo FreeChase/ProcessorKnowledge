@@ -12,8 +12,11 @@
     MemA[frameptr+0x14,4] = LR;
     MemA[frameptr+0x18,4] = ReturnAddress(ExceptionType);
     MemA[frameptr+0x1C,4] = (XPSR<31:10>:frameptralign:XPSR<8:0>);
+
+    
+    习惯用法，R0-R12通用读写寄存器，R13-SP,R14-LR,R15-PC
     ```
- 2. 执行中断函数
+ 1. 执行中断函数
 
 **详细伪代码如下：**
 
