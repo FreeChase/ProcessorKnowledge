@@ -288,82 +288,70 @@ MMU中可配置cache属性。某块RAM配置了cacheable属性，若存放了指
 
 ### 数据读写流向
 
-![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/247a0351540f41ab93eab6830334a461.png)
+```mermaid
+flowchart TD
+    A[CPU执行STR指令] --> B[数据写入Write Buffer]
+    B --> C{是否有DMB指令?}
+    C -->|是| D[等待Write Buffer清空到Cache]
+    C -->|否| E[CPU继续执行后续指令]
+    D --> F[L1 Cache]
+    E --> F
+    F --> G[L2 Cache]
+    G --> H[主存RAM]
+    H --> I{是否Cache清理?}
+    I -->|是| J[数据持久化存储]
+    I -->|否| G
+```
 
 数据流向说明：
 
-- CPU执行STR指令：
+- **CPU执行STR指令阶段**：
+  - 数据首先进入Write Buffer（合并缓冲区）
+  - 处理器继续执行后续指令（非阻塞）
+  - 写操作完成状态立即对当前CPU可见
 
- 	- 数据首先被写入Write Buffer
-	- CPU可以继续执行后续指令，不需等待
+- **Write Buffer到Cache阶段**：
+  - 异步写入L1 D-Cache（由硬件调度）
+  - 写入策略：
+    - 默认：合并相邻写操作（Write Merging）
+    - 遇到DMB指令：强制排空Write Buffer
+    - 遇到DSB指令：确保数据到达目标存储位置
 
-
--	Write Buffer到Cache：
-
-	- Write Buffer会异步地将数据写入L1 Cache
-	- 写入时机由硬件控制
-	- 如果遇到DMB指令，必须等待Write Buffer清空
-
-
-Cache层级之间：
-
-- 在Write-Back策略下：
-
-	- 数据从L1 Cache写回L2 Cache
-数据从L2 Cache写回RAM
-
-
-写回时机：
-
-- Cache line被替换
-- 显式的Clean操作
-- Cache一致性请求
-
-
-
-
-
-Write Buffer特点：
-
-- 纯硬件实现，对软件透明
-- 有限的条目数（通常4-8个）
-- 支持合并写操作（Write Merging）
-- 可以被内存屏障指令控制
-
-使用Write Buffer的好处：
-
-- 提高写操作性能
-- 支持写合并，减少对内存的访问
-- 隐藏内存访问延迟
-
-在不同场景下的行为：
-
-普通写操作：
-
-```c
-STR R1, [R0]    ; 数据进入Write Buffer
-                ; CPU继续执行
-```
-
-
+- **Cache层级同步**（Write-Back策略）：
+  ```mermaid
+  flowchart LR
+    L1D-->|Eviction|L2
+    L2-->|Eviction|L3
+    L3-->|Eviction|RAM
+  ```
+  - 触发条件：
+    - Cache替换策略触发（LRU等）
+    - 显式Clean/Invalidate操作
+    - 一致性协议请求（如多核间缓存一致性）
 
 带内存屏障的写操作：
 ```c
-STR R1, [R0]    ; 数据进入Write Buffer
-DMB             ; 等待Write Buffer清空到Cache
+STR R1, [R0]    // 1. 数据进入Write Buffer
+DMB             // 2. 确保所有存储操作在继续前完成
+                // 3. 清空Write Buffer到L1 D-Cache
 ```
 
 
 带Cache清理的写操作：
 ```c
-STR R1, [R0]    ; 数据进入Write Buffer
-DSB             ; 等待Write Buffer清空到Cache
-Clean Cache     ; 数据写回到RAM
+STR R1, [R0]    // 1. 数据进入Write Buffer
+DSB             // 2. 等待所有存储完成（包括Cache到内存）
+DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
 ```
 
-对程序员的影响：
+对开发者的影响：
+- **常规场景**：
+  - 利用Write Buffer提升性能
+  - 自动缓存管理
+  
+- **关键场景**：
+  - DMA操作前：必须Clean Cache
+  - 多核共享数据：需要DMB+Cache维护
+  - 内存映射I/O：使用Device-nGnRnE内存类型
 
-- 普通数据访问无需关心Write Buffer
-- 需要同步时必须使用内存屏障
-- 要写入RAM时需要Cache维护操作
 # 总结
