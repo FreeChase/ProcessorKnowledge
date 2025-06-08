@@ -12,7 +12,9 @@
     - [MMU](#mmu)
       - [基础知识点](#基础知识点)
         - [页表结构](#页表结构)
-        - [CPU访问流程](#cpu访问流程)
+          - [特权与非特权](#特权与非特权)
+        - [linux相关操作](#linux相关操作)
+    - [CPU访问流程](#cpu访问流程)
     - [数据读写流向](#数据读写流向)
 - [总结](#总结)
 
@@ -130,8 +132,8 @@ MOV R3, #1        ; 下一条指令
 
 对ADD指令的处理有**两种**可能：
 
-1.如果ADD已经进入执行阶段(Execute stage)，则会执行完成
-2.如果ADD还在译码或更早的流水线阶段，则可能会被取消(canceled)并重新执行
+1.如果ADD已经进入执行阶段(Execute stage)，则会**执行完成**
+2.如果ADD还在译码或更早的流水线阶段，则可能会被**取消(canceled)并重新执行**
 
 
 关于**LR**值的设置：
@@ -155,9 +157,9 @@ MOV R3, #1        ; 下一条指令
 使用6-8级流水线
 **当中断发生时**：
 
-1.完成当前指令执行
-2.LR = PC - 4（对于IRQ/FIQ，指向MOV）(ps:若未完成时,LR指向ADD指令)
-3.支持虚拟化扩展（可选）
+1. 完成当前指令执行
+2. LR = PC - 4（对于IRQ/FIQ，指向MOV）(ps:若未完成时,LR指向ADD指令)
+3. 支持虚拟化扩展（可选）
 
 #### `Cortex-A53`：
 采用ARMv8-A架构
@@ -166,31 +168,100 @@ MOV R3, #1        ; 下一条指令
 提供了更多的异常等级（EL0-EL3）
 **当中断发生时**：
 
-1.完成当前指令执行
-2.LR = PC - 4（在AArch32模式下）
-3.在AArch64模式下，使用ELR_ELx寄存器保存返回地址
-4.支持更复杂的异常处理机制
+1. 完成当前指令执行
+2. LR = PC - 4（在AArch32模式下）
+3. 在AArch64模式下，使用ELR_ELx寄存器保存返回地址
+4. 支持更复杂的异常处理机制
 ### MMU
 
 #### 基础知识点
 
 ##### 页表结构
+
+在 arm64/cortex-A53下,`MMU`根据**颗粒度**大小(`granule`),将表分为多级，包括**Table**、**Block**(2MB)、**Page**(4KB).最终通过一个**虚拟地址**通过查表获取对应的**物理地址**(虚拟地址不同bit分区作为MMU Table的索引)
+
+EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
+![alt text](mmu_stage1_part1.png)
+
+![alt text](mmu_stage1_part2.png)
+
+**Table Descriptor Format**:
+
+![alt text](table_descriptor_format.png)
+
+![alt text](table_descriptor_format2.png)
+
+**Lower Attributes [2:15]**
+
+| 位范围    | 字段名       | 含义说明 |
+|-----------|--------------|----------|
+| [4:2]     | AttrIndx[2:0] | 内存属性索引，对应 MAIR_ELx，定义缓存策略和内存类型（Device/Normal） |
+| 5         | NS            | Non-secure bit：标记为安全世界或非安全世界（TrustZone） |
+| [7:6]     | AP[1:0]       | 访问权限：用户态/特权态，读/写 权限设置 |
+| [9:8]     | SH[1:0]       | 共享域设置：Non-shareable、Inner-shareable、Outer-shareable |
+| 10        | AF            | Access Flag：是否已访问（硬件/软件置位） |
+| 11        | nG            | not-Global：设置是否是全局页，影响 TLB 是否与 ASID 绑定 |
+| [15:12]   | OA[51:48]     | 输出物理地址高位部分（配合页基地址） |
+
+
+**Upper Attributes [50:63]**
+
+| 位范围    | 字段名            | 含义说明 |
+|-----------|-------------------|----------|
+| 50        | GP                | Guarded Page（或其他特殊用途，常忽略） |
+| 51        | Reserved          | 保留位 |
+| 52        | DBM / PI[1]       | Dirty Bit Modify 支持，用户态可写标志 |
+| 53        | Contiguous        | 支持页连续优化，用于 TLB 合并 |
+| 54        | PXN / PI[2]       | Privileged Execute Never：禁止 EL1 执行 |
+| 55        | UXN / PI[3]       | Unprivileged Execute Never：禁止 EL0 执行 |
+| [58:56]   | Reserved/Software | 供软件使用或保留 |
+| 59        | PBHA[0] / AttrIndx[3] | Page Based Hardware Attributes，平台相关 |
+| [62:60]   | PBHA[3:1] / POIndex[2:0] | 同上，QoS / Cache Hint 用 |
+| 63        | AMEC              | Allocation Management Enable Code，硬件或平台使用 |
+
+###### 特权与非特权
+| 术语               | 中文含义  | 描述                       |
+| ---------------- | ----- | ------------------------ |
+| **Privileged**   | 特权模式  | 操作系统核心、驱动代码运行的模式，权限最高    |
+| **Unprivileged** | 非特权模式 | 用户态程序运行的模式，权限受限，不能直接访问硬件 |
+
+| EL级别 | 运行模式           | 典型用途           | 是否特权模式            |
+| ---- | -------------- | -------------- | ----------------- |
+| EL3  | Secure Monitor | TrustZone 安全监控 | ✅ 是               |
+| EL2  | Hypervisor     | 虚拟化支持          | ✅ 是               |
+| EL1  | Kernel / OS    | 操作系统内核         | ✅ 是               |
+| EL0  | User Space     | 应用程序           | ❌ 否（Unprivileged） |
+
+
+| 对比项             | Unprivileged (EL0) | Privileged (EL1+) |
+| --------------- | ------------------ | ----------------- |
+| 是否能访问系统寄存器      | ❌ 否                | ✅ 是               |
+| 是否能修改页表或MMU     | ❌ 否                | ✅ 是               |
+| 是否能执行异常处理       | ❌ 否                | ✅ 是               |
+| 是否可执行SVC（软件中断）  | ✅ 可以请求服务           | ✅ 可以处理            |
+| 是否可执行 `WFI/WFE` | ❌ 否                | ✅ 是               |
+| 能否开启/关闭中断       | ❌ 否                | ✅ 是               |
+| 常见用途            | 用户程序（shell、APP）    | 内核、驱动、异常处理等       |
+
+
+总结一句话：
+Privileged 是“特权态”用于操作系统和核心控制逻辑；Unprivileged 是“用户态”，用于运行用户应用，受到严格限制，防止破坏系统稳定性。
+
+在**ARM64**上:
+
+- TTBR0_EL1: 指向**用户**空间**页表基地址**
+- TTBR1_EL1: 指向**内核**空间**页表基地址**
+- 每个进程都有自己的**用户空间页表**(`TTBR0`)
+- 所有进程共享同一个**内核页表**(`TTBR1`)
+
+##### linux相关操作
+
 Linux 通常采用四级页表结构:
 
 - PGD (Page Global Directory)
 - PUD (Page Upper Directory)
 - PMD (Page Middle Directory)
 - PTE (Page Table Entry)
-
-
-
-在**ARM64**上:
-
-- TTBR0_EL1: 指向用户空间页表基地址
-- TTBR1_EL1: 指向内核空间页表基地址
-- 每个进程都有自己的用户空间页表(TTBR0)
-- 所有进程共享同一个内核页表(TTBR1)
-
 
 ```c
 页表切换过程
@@ -209,6 +280,7 @@ switch_mm() {
         update_asid(next_asid);
     }
 }
+
 ```
 内存管理的关键概念：
 
@@ -219,37 +291,37 @@ switch_mm() {
 
 
 
-##### CPU访问流程
+### CPU访问流程
 
 **CPU取指令阶段:**
 
 
-CPU首先获取程序计数器(PC)中的虚拟地址
-这个虚拟地址需要被转换为物理地址才能访问实际的内存
+CPU首先获取程序计数器(PC)中的**虚拟地址**
+这个**虚拟地址**需要被转换为物理地址才能访问实际的内存
 
 
 地址转换过程:
 
-- 首先检查TLB(Translation Lookaside Buffer):
+- 首先检查`TLB(Translation Lookaside Buffer)`:
 
-	CPU会先查找TLB缓存
-	TLB条目包含ASID(Address Space ID)和虚拟地址到物理地址的映射
-	ASID用于区分不同进程的地址空间,避免TLB刷新
-	如果找到匹配的TLB条目(TLB hit),直接使用缓存的物理地址
+    - CPU会先查找TLB缓存
+    - TLB条目包含`ASID(Address Space ID)`和虚拟地址到物理地址的映射
+    - `ASID`用于区分不同进程的地址空间,避免TLB刷新
+    - 如果找到匹配的`TLB`条目(`TLB hit`),直接使用缓存的物理地址
 
 -  TLB未命中时的页表遍历:
 
-	CPU读取TTBR(Translation Table Base Register)获取页表基地址
-	对于ARM架构通常是两级页表结构
-	使用虚拟地址的不同位段索引页表
-	最终得到物理页框号(PFN)
+    - CPU读取`TTBR(Translation Table Base Register)`获取页表基地址
+    - 对于ARM架构通常是两级页表结构
+    - 使用虚拟地址的不同位段索引页表
+    - 最终得到物理页框号(PFN)
 
 
 **Cache访问:**
 
 
 得到物理地址后,先检查Cache
-- 现代CPU通常采用VIPT(Virtually Indexed Physically Tagged)Cache
+- 现代CPU通常采用`VIPT(Virtually Indexed Physically Tagged)Cache`
 - Cache使用虚拟地址的低位作为索引,物理地址作为Tag
 - 如果Cache命中,直接返回数据
 - Cache缺失则需要访问内存
