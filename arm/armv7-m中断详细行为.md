@@ -20,6 +20,7 @@
 **详细伪代码如下：**
 
 **The ExceptionEntry() pseudocode function describes the exception entry behavior:**
+```lua
 -- 异常编号枚举
 -- ============================
 constant integer Reset = 1;
@@ -44,7 +45,7 @@ ExceptionEntry(integer ExceptionType)
 --]]
     PushStack(ExceptionType);
     ExceptionTaken(ExceptionType);
-
+```
 **The definitions of the PushStack() and ExceptionTaken() pseudocode functions are:**
 ```lua
 -- PushStack()
