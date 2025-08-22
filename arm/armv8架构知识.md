@@ -191,6 +191,14 @@ EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
 
 ![alt text](table_descriptor_format2.png)
 
+**Lower Attributes [0:1]**
+|Bits [1:0]	|Type	|Meaning|
+|-|-|-|
+|0b00|Invalid|这个页表项无效。如果 MMU 尝试访问这个条目，会触发一个 转换错误（translation fault）。通常用于表示未映射或无效的内存区域。|
+|0b01|Block or Page|这个页表项是一个 块（Block） 或 页（Page） 的描述符。这意味着地址转换在这里结束，页表项的其余部分直接包含了 物理地址 和 内存属性。|
+|0b10|Reserved|这个值被保留给未来的用途，如果 MMU 遇到这个值，也会触发一个转换错误。|
+|0b11|Table|这个值被保留给未来的用途，如果 MMU 遇到这个值，也会触发一个转换错误。|
+
 **Lower Attributes [2:15]**
 
 | 位范围    | 字段名       | 含义说明 |
