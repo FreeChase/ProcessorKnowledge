@@ -14,6 +14,7 @@
         - [stage与页表层数](#stage与页表层数)
         - [TCR\_EL3(Translation Control Register EL3)](#tcr_el3translation-control-register-el3)
         - [页表结构](#页表结构)
+          - [页表类型](#页表类型)
           - [特权与非特权](#特权与非特权)
         - [linux相关操作](#linux相关操作)
     - [CPU访问流程](#cpu访问流程)
@@ -182,13 +183,13 @@ MOV R3, #1        ; 下一条指令
 
 **一、Stage 是指转换阶段，不是页表层数**
 
-- Stage 1 Translation：
+- **Stage 1 Translation**：
 
   虚拟地址（VA） → 中间物理地址（IPA，Intermediate Physical Address，EL1/EL3时就是物理地址）
 
-  普通应用、内核、EL3固件大部分情况只用 Stage 1
+  普通应用、内核、EL3固件**大部分情况只用 Stage 1**
 
-- Stage 2 Translation：
+- **Stage 2 Translation**：
 
   IPA → 物理地址（PA）
 
@@ -544,18 +545,88 @@ TCR_EL3 是一个 64 位寄存器
 
 ##### 页表结构
 
+
+###### 页表类型
 在 arm64/cortex-A53下,`MMU`根据**颗粒度**大小(`granule`),将表分为多级，包括**Table**、**Block**(2MB)、**Page**(4KB).最终通过一个**虚拟地址**通过查表获取对应的**物理地址**(虚拟地址不同bit分区作为MMU Table的索引)
+| Descriptor Type | 描述 | 用途 | 映射大小 |
+|-----------------|------|------|----------|
+| Table           | 指向下一级页表的表格描述符 | 用于多级页表结构，链接到下一级表 | 不直接映射物理内存，指向下一级页表 |
+| Block           | 映射一段连续物理内存的块描述符 | 用于较大内存区域，直接映射，不进入下一级表 | Level 0: 512 GB<br>Level 1: 1 GB<br>Level 2: 2 MB |
+| Page            | 映射单个页面的页描述符 | 用于精细的页面映射 | 4 KB / 16 KB / 64 KB（取决于配置） |
+
+
 
 EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
-![alt text](mmu_stage1_part1.png)
 
-![alt text](mmu_stage1_part2.png)
+
+<div style="text-align: center;">
+    <img src="mmu_stage1_part1.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="translate_stage1_4kb.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="mmu_stage1_part2.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
 
 **Table Descriptor Format**:
 
-![alt text](table_descriptor_format.png)
+<div style="text-align: center;">
+    <img src="table_descriptor.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
 
-![alt text](table_descriptor_format2.png)
+
+
+| 位段         | 字段 / 值         | 条件 / 说明 |
+|--------------|-------------------|-------------|
+| [63]         | RES0 / NSTable     | 非安全状态为 RES0；安全状态为 NSTable。详见 *Hierarchical control of Secure or Non-secure memory accesses*。 |
+| [62:61]      | APTable[1:0]       | 启用层级权限时有效；若 `HCR_EL2.{NV,NV1}=={1,1}`，则 `APTable[0]=0`。详见 *Hierarchical control of data access Direct permissions*。 |
+| [60]         | XNTable / UXNTable / PXNTable | 在第1阶段（Stage 1）地址转换中，某一查找级别（lookup level）的页表项可以限制后续查找级别中使用直接权限（Direct permissions）所表达的指令执行控制 |
+| [59]         | RES0 / PXNTable    | 启用层级权限时：单特权级或 EL1&0 且 `HCR_EL2.{NV,NV1}=={1,1}` 为 RES0；双特权级为 PXNTable。 |
+| [58:53]      | IGNORED            | 忽略。 |
+| [52]         | Protected / IGNORED| 当 `PnCH=1` 时为 Protected；否则忽略。详见 *Stage 1 Protected Attribute*。 |
+| [51]         | IGNORED            | 忽略。 |
+| [50]         | RES0               | 保留为 0。 |
+| [49:48]      | RES0 / NLTA[49:48] | 4KB/16KB 且 DS=0 或 64KB 粒度为 RES0；4KB/16KB 且 DS=1 为 NLTA[49:48]。 |
+| [47:12]      | NLTA[...]          | 4KB 粒度：NLTA[47:12]；16KB 粒度：NLTA[47:14]（bits[13:12] 为 RES0）；64KB 粒度：NLTA[47:16]（未实现 LPA）；64KB+LPA：NLTA[47:16]+NLTA[51:48]。 |
+| [11]         | IGNORED            | 忽略。 |
+| [10]         | Access flag (AF) / IGNORED | 硬件管理 AF 启用时为 Access flag，否则忽略。详见 *Hardware management of the Table descriptor Access Flag*。 |
+| [9:8]        | IGNORED / NLTA[51:50] | 4KB/16KB 且 DS=0 或 64KB 粒度为忽略；4KB/16KB 且 DS=1 为 NLTA[51:50]。 |
+| [7:2]        | IGNORED            | 忽略。 |
+| [1]          | Table descriptor   | 为 1 表示是表描述符（适用于 L3 以上）。 |
+| [0]          | Valid descriptor   | 为 1 表示描述符有效。 |
+
+**XNTable / UXNTable / PXNTable 补充说明**
+用于指示“**Execute-never (XN)**” 是 ARM 架构中的一个内存访问控制标志，用来控制特定内存页或块是否允许执行指令。它的意思是不可执行，也就是**禁止 CPU 在这块内存中执行指令**。
+
+具体理解如下：
+
+1. XN = 1（有效）
+
+     - 表示 “不可执行”。
+
+    - CPU 如果尝试在该内存页或块上执行指令，就会产生 异常 (Exception)，通常是 仿真环境下的执行中止 或 Data/Instruction Abort。
+
+1. XN = 0（无效）
+
+    - 表示 “可以执行”。
+
+    - CPU 可以在该内存页或块中正常执行指令。
+
+| 字段        | 有效值 = 0 的行为       | 有效值 = 1 的行为                                                                                                   |
+|-------------|-------------------------|---------------------------------------------------------------------------------------------------------------------|
+| XNTable      | 无影响                  | - 后续查找级别中的块描述符、页描述符的 XN 字段被强制视为 1<br>- 其他级别的 XNTable / XN 字段取值和解释不受影响           |
+| UXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 UXN 字段被强制视为 1<br>- 其他级别的 UXNTable / UXN 字段取值和解释不受影响         |
+| PXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 PXN 字段被强制视为 1<br>- 其他级别的 PXNTable / PXN 字段取值和解释不受影响         |
+
+**Block Descriptor Format**:
+
+<div style="text-align: center;">
+    <img src="table_descriptor_format.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="table_descriptor_format2.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
 
 **Lower Attributes [0:1]**
 |Bits [1:0]	|Type	|Meaning|
