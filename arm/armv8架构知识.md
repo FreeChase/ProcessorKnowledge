@@ -581,7 +581,7 @@ EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
 |--------------|-------------------|-------------|
 | [63]         | RES0 / NSTable     | 非安全状态为 RES0；安全状态为 NSTable。详见 *Hierarchical control of Secure or Non-secure memory accesses*。 |
 | [62:61]      | APTable[1:0]       | 启用层级权限时有效；若 `HCR_EL2.{NV,NV1}=={1,1}`，则 `APTable[0]=0`。详见 *Hierarchical control of data access Direct permissions*。 |
-| [60]         | XNTable / UXNTable / PXNTable | 在第1阶段（Stage 1）地址转换中，某一查找级别（lookup level）的页表项可以限制后续查找级别中使用直接权限（Direct permissions）所表达的指令执行控制 |
+| [60]         | XNTable / UXNTable / PXNTable | 在第1阶段（Stage 1）地址转换中，某一查找级别（lookup level）的页表项可以限制后续查找级别中使用直接权限（Direct permissions）所表达的指令执行控制 [XN详解](#Execute_never_supplement)|
 | [59]         | RES0 / PXNTable    | 启用层级权限时：单特权级或 EL1&0 且 `HCR_EL2.{NV,NV1}=={1,1}` 为 RES0；双特权级为 PXNTable。 |
 | [58:53]      | IGNORED            | 忽略。 |
 | [52]         | Protected / IGNORED| 当 `PnCH=1` 时为 Protected；否则忽略。详见 *Stage 1 Protected Attribute*。 |
@@ -596,28 +596,7 @@ EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
 | [1]          | Table descriptor   | 为 1 表示是表描述符（适用于 L3 以上）。 |
 | [0]          | Valid descriptor   | 为 1 表示描述符有效。 |
 
-**XNTable / UXNTable / PXNTable 补充说明**
-用于指示“**Execute-never (XN)**” 是 ARM 架构中的一个内存访问控制标志，用来控制特定内存页或块是否允许执行指令。它的意思是不可执行，也就是**禁止 CPU 在这块内存中执行指令**。
 
-具体理解如下：
-
-1. XN = 1（有效）
-
-     - 表示 “不可执行”。
-
-    - CPU 如果尝试在该内存页或块上执行指令，就会产生 异常 (Exception)，通常是 仿真环境下的执行中止 或 Data/Instruction Abort。
-
-1. XN = 0（无效）
-
-    - 表示 “可以执行”。
-
-    - CPU 可以在该内存页或块中正常执行指令。
-
-| 字段        | 有效值 = 0 的行为       | 有效值 = 1 的行为                                                                                                   |
-|-------------|-------------------------|---------------------------------------------------------------------------------------------------------------------|
-| XNTable      | 无影响                  | - 后续查找级别中的块描述符、页描述符的 XN 字段被强制视为 1<br>- 其他级别的 XNTable / XN 字段取值和解释不受影响           |
-| UXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 UXN 字段被强制视为 1<br>- 其他级别的 UXNTable / UXN 字段取值和解释不受影响         |
-| PXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 PXN 字段被强制视为 1<br>- 其他级别的 PXNTable / PXN 字段取值和解释不受影响         |
 
 **Block Descriptor Format**:
 
@@ -873,8 +852,30 @@ DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
 
 # 补充
 
+<a id="Execute_never_supplement"></a>
 
+**XNTable / UXNTable / PXNTable 补充说明**<br>
+用于指示“**Execute-never (XN)**” 是 ARM 架构中的一个内存访问控制标志，用来控制特定内存页或块是否允许执行指令。它的意思是不可执行，也就是**禁止 CPU 在这块内存中执行指令**。
 
+具体理解如下：
+
+1. XN = 1（有效）
+
+     - 表示 “不可执行”。
+
+    - CPU 如果尝试在该内存页或块上执行指令，就会产生 异常 (Exception)，通常是 仿真环境下的执行中止 或 Data/Instruction Abort。
+
+1. XN = 0（无效）
+
+    - 表示 “可以执行”。
+
+    - CPU 可以在该内存页或块中正常执行指令。
+
+| 字段        | 有效值 = 0 的行为       | 有效值 = 1 的行为                                                                                                   |
+|-------------|-------------------------|---------------------------------------------------------------------------------------------------------------------|
+| XNTable      | 无影响                  | - 后续查找级别中的块描述符、页描述符的 XN 字段被强制视为 1<br>- 其他级别的 XNTable / XN 字段取值和解释不受影响           |
+| UXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 UXN 字段被强制视为 1<br>- 其他级别的 UXNTable / UXN 字段取值和解释不受影响         |
+| PXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 PXN 字段被强制视为 1<br>- 其他级别的 PXNTable / PXN 字段取值和解释不受影响         |
 
 
 <a id="sh_bit_meaning"></a>
