@@ -12,7 +12,7 @@
     - [MMU](#mmu)
       - [基础知识点](#基础知识点)
         - [stage与页表层数](#stage与页表层数)
-        - [TCR\_EL3(Translation Control Register EL3)](#tcr_el3translation-control-register-el3)
+        - [TCR\_EL3](#tcr_el3)
         - [页表结构](#页表结构)
           - [页表类型](#页表类型)
           - [特权与非特权](#特权与非特权)
@@ -240,7 +240,10 @@ ARMv8 64 位地址翻译，最多 4 级页表，每级映射 9bit 地址空间�
     → 2 级页表
     ```
 
-##### TCR_EL3(Translation Control Register EL3)
+##### TCR_EL3
+
+**Translation Control Register EL3**
+
 
 - 用途（Purpose）
 用于控制 EL3 级别第一阶段地址转换的寄存器。
