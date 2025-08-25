@@ -19,12 +19,12 @@
         - [linux相关操作](#linux相关操作)
     - [CPU访问流程](#cpu访问流程)
     - [数据读写流向](#数据读写流向)
+- [补充](#补充)
 - [总结](#总结)
 
 ---
 
 # 前言
-
 
 本文主要描述armv8架构
 
@@ -643,7 +643,7 @@ EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
 | [4:2]     | AttrIndx[2:0] | 内存属性索引，对应 MAIR_ELx，定义缓存策略和内存类型（Device/Normal） |
 | 5         | NS            | Non-secure bit：标记为安全世界或非安全世界（TrustZone） |
 | [7:6]     | AP[1:0]       | 访问权限：用户态/特权态，读/写 权限设置 |
-| [9:8]     | SH[1:0]       | 共享域设置：Non-shareable、Inner-shareable、Outer-shareable |
+| [9:8]     | SH[1:0]       | 共享域设置：Non-shareable、Inner-shareable、Outer-shareable [bit详解](#sh_bit_meaning)|
 | 10        | AF            | Access Flag：是否已访问（硬件/软件置位） |
 | 11        | nG            | not-Global：设置是否是全局页，影响 TLB 是否与 ASID 绑定 |
 | [15:12]   | OA[51:48]     | 输出物理地址高位部分（配合页基地址） |
@@ -870,5 +870,20 @@ DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
   - DMA操作前：必须Clean Cache
   - 多核共享数据：需要DMB+Cache维护
   - 内存映射I/O：使用Device-nGnRnE内存类型
+
+# 补充
+
+
+
+
+
+<a id="sh_bit_meaning"></a>
+**Stage1 Shareability attributes**
+|SH[1:0]|Normal Memory|
+|-|-|
+|0b00|Non-Sharable|
+|0b01|Reserve|
+|0b10|Outer Shareable|
+|0b11|Inner Shareable|
 
 # 总结
