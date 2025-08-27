@@ -216,9 +216,10 @@ ARMv8 64 位地址翻译，最多 4 级页表，每级映射 9bit 地址空间�
 1. 确定虚拟地址位数：**VA_bits = 64 - T0SZ（TCR_ELx.T0SZ）**
 2. 每级页表提供 **9bit** × **页表基本寻址单元** 大小的寻址空间
 3. 64位架构，一个页表项占8byte空间，一个页表占**512×8Byte**空间
-4. 页大小由 [TGX](#register_tcr_tg0) 决定（4KB = 12bit offset）
+4. MMU 页表中的低位不用于存储地址，这导致了页表地址必须**对齐**到某个**特定的边界**，比如2^12(4096)Byte
+5. 页大小由 [TGX](#register_tcr_tg0) 决定（4KB = 12bit offset）
 
-5. 公式：
+6. 公式：
     ```ini
       N = ceil((VA_bits - page_offset_bits) / 9)
       page_offset_bits = 12 (4KB), 14 (16KB), 16 (64KB)
