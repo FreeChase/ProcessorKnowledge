@@ -13,10 +13,11 @@
       - [基础知识点](#基础知识点)
         - [stage与页表层数](#stage与页表层数)
         - [TCR\_EL3](#tcr_el3)
-        - [页表结构](#页表结构)
+        - [**页表结构**](#页表结构)
           - [页表类型](#页表类型)
           - [特权与非特权](#特权与非特权)
         - [linux相关操作](#linux相关操作)
+        - [VIPT](#vipt)
     - [CPU访问流程](#cpu访问流程)
     - [数据读写流向](#数据读写流向)
 - [补充](#补充)
@@ -290,8 +291,382 @@ TCR_EL3 是一个 64 位寄存器
 | \[7:6]   | -      | 保留，写0 (RES0)                             |
 | \[5:0]   | T0SZ   | 虚拟地址空间大小控制 (VA size = 2^(64-T0SZ))       |
 
+[TCR_EL3 Bit详解](#tcrel3_bit_meaning)
+
+##### **页表结构**
+---
+
+###### 页表类型
+在 arm64/cortex-A53下,`MMU`根据**颗粒度**大小(`granule`),将表分为多级，包括**Table**、**Block**(2MB)、**Page**(4KB).最终通过一个**虚拟地址**通过查表获取对应的**物理地址**(虚拟地址不同bit分区作为MMU Table的索引)
+| Descriptor Type | 描述 | 用途 | 映射大小 |
+|-----------------|------|------|----------|
+| Table           | 指向下一级页表的表格描述符 | 用于多级页表结构，链接到下一级表 | 不直接映射物理内存，指向下一级页表 |
+| Block           | 映射一段连续物理内存的块描述符 | 用于较大内存区域，直接映射，不进入下一级表 | Level 0: 512 GB<br>Level 1: 1 GB<br>Level 2: 2 MB |
+| Page            | 映射单个页面的页描述符 | 用于精细的页面映射 | 4 KB / 16 KB / 64 KB（取决于配置） |
 
 
+
+EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
+
+
+<div style="text-align: center;">
+    <img src="image/mmu_stage1_part1.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="image/translate_stage1_4kb.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="image/mmu_stage1_part2.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+
+**Table Descriptor Format**:
+
+<div style="text-align: center;">
+    <img src="image/table_descriptor.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="image/mmutable_table.png" alt="table attribute" width="70%" height="70%" />
+</div>
+
+
+
+| 位段         | 字段 / 值         | 条件 / 说明 |
+|--------------|-------------------|-------------|
+| [63]         | RES0 / NSTable     | 非安全状态为 RES0；安全状态为 NSTable。详见 *Hierarchical control of Secure or Non-secure memory accesses*。 |
+| [62:61]      | APTable[1:0]       | 启用层级权限时有效；若 `HCR_EL2.{NV,NV1}=={1,1}`，则 `APTable[0]=0`。详见 *Hierarchical control of data access Direct permissions*。 |
+| [60]         | XNTable / UXNTable / PXNTable | 在第1阶段（Stage 1）地址转换中，某一查找级别（lookup level）的页表项可以限制后续查找级别中使用直接权限（Direct permissions）所表达的指令执行控制 [XN详解](#Execute_never_supplement)|
+| [59]         | RES0 / PXNTable    | 启用层级权限时：单特权级或 EL1&0 且 `HCR_EL2.{NV,NV1}=={1,1}` 为 RES0；双特权级为 PXNTable。 |
+| [58:53]      | IGNORED            | 忽略。 |
+| [52]         | Protected / IGNORED| 当 `PnCH=1` 时为 Protected；否则忽略。详见 *Stage 1 Protected Attribute*。 |
+| [51]         | IGNORED            | 忽略。 |
+| [50]         | RES0               | 保留为 0。 |
+| [49:48]      | RES0 / NLTA[49:48] | 4KB/16KB 且 DS=0 或 64KB 粒度为 RES0；4KB/16KB 且 DS=1 为 NLTA[49:48]。 |
+| [47:12]      | NLTA[...]          | 4KB 粒度：NLTA[47:12]；16KB 粒度：NLTA[47:14]（bits[13:12] 为 RES0）；64KB 粒度：NLTA[47:16]（未实现 LPA）；64KB+LPA：NLTA[47:16]+NLTA[51:48]。 |
+| [11]         | IGNORED            | 忽略。 |
+| [10]         | Access flag (AF) / IGNORED | 硬件管理 AF 启用时为 Access flag，否则忽略。详见 *Hardware management of the Table descriptor Access Flag*。 |
+| [9:8]        | IGNORED / NLTA[51:50] | 4KB/16KB 且 DS=0 或 64KB 粒度为忽略；4KB/16KB 且 DS=1 为 NLTA[51:50]。 |
+| [7:2]        | IGNORED            | 忽略。 |
+| [1]          | Table descriptor   | 为 1 表示是表描述符（适用于 L3 以上）。 |
+| [0]          | Valid descriptor   | 为 1 表示描述符有效。 |
+
+
+
+**Block Descriptor Format**:
+
+<div style="text-align: center;">
+    <img src="image/table_descriptor_format.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="image/table_descriptor_format2.png" alt="stage1 4kb" width="70%" height="70%" />
+</div>
+
+**Lower Attributes [0:1]**
+|Bits [1:0]	|Type	|Meaning|
+|-|-|-|
+|0b00|Invalid|这个页表项无效。如果 MMU 尝试访问这个条目，会触发一个 转换错误（translation fault）。通常用于表示未映射或无效的内存区域。|
+|0b01|Block or Page|这个页表项是一个 块（Block） 或 页（Page） 的描述符。这意味着地址转换在这里结束，页表项的其余部分直接包含了 物理地址 和 内存属性。|
+|0b10|Reserved|这个值被保留给未来的用途，如果 MMU 遇到这个值，也会触发一个转换错误。|
+|0b11|Table|这个值被保留给未来的用途，如果 MMU 遇到这个值，也会触发一个转换错误。|
+
+**Lower Attributes [2:15]**
+
+| 位范围    | 字段名       | 含义说明 |
+|-----------|--------------|----------|
+| [4:2]     | AttrIndx[2:0] | 内存属性索引，对应 MAIR_ELx，定义缓存策略和内存类型（Device/Normal） |
+| 5         | NS            | Non-secure bit：标记为安全世界或非安全世界（TrustZone） |
+| [7:6]     | AP[1:0]       | 访问权限：用户态/特权态，读/写 权限设置 |
+| [9:8]     | SH[1:0]       | 共享域设置：Non-shareable、Inner-shareable、Outer-shareable [bit详解](#sh_bit_meaning)|
+| 10        | AF            | Access Flag：是否已访问（硬件/软件置位） |
+| 11        | nG            | not-Global：设置是否是全局页，影响 TLB 是否与 ASID 绑定 |
+| [15:12]   | OA[51:48]     | 输出物理地址高位部分（配合页基地址） |
+
+
+**Upper Attributes [50:63]**
+
+| 位范围    | 字段名            | 含义说明 |
+|-----------|-------------------|----------|
+| 50        | GP                | Guarded Page（或其他特殊用途，常忽略） |
+| 51        | DBM / PI[1]       | Dirty Bit Modify 支持，用户态可写标志 |
+| 52        | Contiguous        | 支持页连续优化，用于 TLB 合并 |
+| 53        | PXN / PI[2]       | Privileged Execute Never：禁止 EL1 执行 |
+| 54        | UXN / PI[3]       | Unprivileged Execute Never：禁止 EL0 执行 |
+| [58:55]   | Reserved/Software | 供软件使用或保留 |
+| 59        | PBHA[0] / AttrIndx[3] | Page Based Hardware Attributes，平台相关 |
+| [62:60]   | PBHA[3:1] / POIndex[2:0] | 同上，QoS / Cache Hint 用 |
+| 63        | AMEC              | Allocation Management Enable Code，硬件或平台使用 |
+
+
+**Page Descriptor Format**:
+
+<div style="text-align: center;">
+    <img src="image/mmutable_page.png" alt="page " width="70%" height="70%" />
+</div>
+<div style="text-align: center;">
+    <img src="image/mmutable_page_attribute.png" alt="page attribute" width="70%" height="70%" />
+</div>
+
+
+###### 特权与非特权
+| 术语               | 中文含义  | 描述                       |
+| ---------------- | ----- | ------------------------ |
+| **Privileged**   | 特权模式  | 操作系统核心、驱动代码运行的模式，权限最高    |
+| **Unprivileged** | 非特权模式 | 用户态程序运行的模式，权限受限，不能直接访问硬件 |
+
+| EL级别 | 运行模式           | 典型用途           | 是否特权模式            |
+| ---- | -------------- | -------------- | ----------------- |
+| EL3  | Secure Monitor | TrustZone 安全监控 | ✅ 是               |
+| EL2  | Hypervisor     | 虚拟化支持          | ✅ 是               |
+| EL1  | Kernel / OS    | 操作系统内核         | ✅ 是               |
+| EL0  | User Space     | 应用程序           | ❌ 否（Unprivileged） |
+
+
+| 对比项             | Unprivileged (EL0) | Privileged (EL1+) |
+| --------------- | ------------------ | ----------------- |
+| 是否能访问系统寄存器      | ❌ 否                | ✅ 是               |
+| 是否能修改页表或MMU     | ❌ 否                | ✅ 是               |
+| 是否能执行异常处理       | ❌ 否                | ✅ 是               |
+| 是否可执行SVC（软件中断）  | ✅ 可以请求服务           | ✅ 可以处理            |
+| 是否可执行 `WFI/WFE` | ❌ 否                | ✅ 是               |
+| 能否开启/关闭中断       | ❌ 否                | ✅ 是               |
+| 常见用途            | 用户程序（shell、APP）    | 内核、驱动、异常处理等       |
+
+
+总结一句话：
+Privileged 是“特权态”用于操作系统和核心控制逻辑；Unprivileged 是“用户态”，用于运行用户应用，受到严格限制，防止破坏系统稳定性。
+
+在**ARM64**上:
+
+- TTBR0_EL1: 指向**用户**空间**页表基地址**
+- TTBR1_EL1: 指向**内核**空间**页表基地址**
+- 每个进程都有自己的**用户空间页表**(`TTBR0`)
+- 所有进程共享同一个**内核页表**(`TTBR1`)
+
+##### linux相关操作
+
+Linux 通常采用四级页表结构:
+
+- PGD (Page Global Directory)
+- PUD (Page Upper Directory)
+- PMD (Page Middle Directory)
+- PTE (Page Table Entry)
+
+```c
+页表切换过程
+switch_mm() {
+    // 1. 获取新进程的页表基地址
+    pgd = next->mm->pgd;
+    
+    // 2. 切换TTBR0寄存器
+    write_ttbr0(pgd);
+    
+    // 3. 刷新TLB
+    flush_tlb_local();  // 清除旧进程的TLB项
+    
+    // 4. 更新ASID(Address Space ID)
+    if (prev_asid != next_asid) {
+        update_asid(next_asid);
+    }
+}
+
+```
+内存管理的关键概念：
+
+- 每个进程有独立的虚拟地址空间
+- 内核空间在所有进程中映射相同
+- 使用ASID来避免切换时完全刷新TLB
+- 页表项包含访问权限、缓存属性等标志位
+
+
+
+##### VIPT
+
+**VIPT (Virtually Indexed, Physically Tagged)**
+
+`VIPT` 是一种优化后的寻址策略，旨在解决 PIPT 的性能瓶颈
+- **工作原理**: CPU 发出的 虚拟地址 的一部分（通常是低位）直接用于缓存的 索引（Index）。这意味着缓存查找可以与 MMU 查找并行进行。当 MMU 的转换结果（物理地址）返回时，缓存使用这个物理地址的标签（Tag）部分进行验证。
+
+- 优点:
+
+    - **高性能**: 由于 `MMU` 查找和缓存索引查找可以同时进行，这极大地减少了内存访问延迟。这是 `VIPT` 最主要的优势。
+
+    - **复杂性**: VIPT 的设计需要特别注意，因为不同的虚拟地址可能映射到同一个物理地址（**同义词**问题），而同一个虚拟地址也可能映射到不同的物理地址（**异义词**问题）。
+
+### CPU访问流程
+
+**CPU取指令阶段:**
+
+
+CPU首先获取程序计数器(PC)中的**虚拟地址**
+这个**虚拟地址**需要被转换为物理地址才能访问实际的内存
+
+
+地址转换过程:
+
+- 首先检查`TLB(Translation Lookaside Buffer)`:
+
+    - CPU会先查找TLB缓存
+    - TLB条目包含`ASID(Address Space ID)`和虚拟地址到物理地址的映射
+    - `ASID`用于区分不同进程的地址空间,避免TLB刷新
+    - 如果找到匹配的`TLB`条目(`TLB hit`),直接使用缓存的物理地址
+
+-  TLB未命中时的页表遍历:
+
+    - CPU读取`TTBR(Translation Table Base Register)`获取页表基地址
+    - 对于ARM架构通常是两级页表结构
+    - 使用虚拟地址的不同位段索引页表
+    - 最终得到物理页框号(PFN)
+
+
+**Cache访问:**
+
+
+得到物理地址后,先检查Cache
+- 现代CPU通常采用`VIPT(Virtually Indexed Physically Tagged)Cache`
+- Cache使用虚拟地址的低位作为索引,物理地址作为Tag
+- 如果Cache命中,直接返回数据
+- Cache缺失则需要访问内存
+
+
+**实际执行过程中的优化:**
+
+
+- CPU会进行指令预取,填充指令Cache
+- 分支预测会提前计算可能用到的地址
+- MMU包含micro-TLB专门用于指令地址转换
+- Cache和TLB并行查询以提高性能
+
+**这个过程涉及几个关键组件的协同工作:**
+
+- ASID确保每个进程有独立的地址空间视图
+- TTBR指向当前进程的页表结构
+- TLB缓存最近使用的地址转换结果
+- Cache系统隐藏内存访问延迟
+
+**当进程切换时:**
+
+- 需要更新TTBR指向新进程的页表
+- 可能需要刷新TLB(除非使用ASID)
+- Context Switch会影响Cache性能
+
+**这些机制共同保证了虚拟内存的正确性和性能。每个组件都针对特定问题提供优化:**
+
+- ASID解决进程隔离问题
+- TLB解决地址转换速度问题
+- Cache解决内存访问延迟问题
+
+
+MMU中可配置cache属性。某块RAM配置了cacheable属性，若存放了指令，则会使用Icache，若触发了访问，则会使用Dcache。
+
+
+### 数据读写流向
+
+```mermaid
+flowchart TD
+    A[CPU执行STR指令] --> B[数据写入Write Buffer]
+    B --> C{是否有DMB指令?}
+    C -->|是| D[等待Write Buffer清空到Cache]
+    C -->|否| E[CPU继续执行后续指令]
+    D --> F[L1 Cache]
+    E --> F
+    F --> G[L2 Cache]
+    G --> H[主存RAM]
+    H --> I{是否Cache清理?}
+    I -->|是| J[数据持久化存储]
+    I -->|否| G
+```
+
+数据流向说明：
+
+- **CPU执行STR指令阶段**：
+  - 数据首先进入Write Buffer（合并缓冲区）
+  - 处理器继续执行后续指令（非阻塞）
+  - 写操作完成状态立即对当前CPU可见
+
+- **Write Buffer到Cache阶段**：
+  - 异步写入L1 D-Cache（由硬件调度）
+  - 写入策略：
+    - 默认：合并相邻写操作（Write Merging）
+    - 遇到DMB指令：强制排空Write Buffer
+    - 遇到DSB指令：确保数据到达目标存储位置
+
+- **Cache层级同步**（Write-Back策略）：
+  ```mermaid
+  flowchart LR
+    L1D-->|Eviction|L2
+    L2-->|Eviction|L3
+    L3-->|Eviction|RAM
+  ```
+  - 触发条件：
+    - Cache替换策略触发（LRU等）
+    - 显式Clean/Invalidate操作
+    - 一致性协议请求（如多核间缓存一致性）
+
+带内存屏障的写操作：
+```c
+STR R1, [R0]    // 1. 数据进入Write Buffer
+DMB             // 2. 确保所有存储操作在继续前完成
+                // 3. 清空Write Buffer到L1 D-Cache
+```
+
+
+带Cache清理的写操作：
+```c
+STR R1, [R0]    // 1. 数据进入Write Buffer
+DSB             // 2. 等待所有存储完成（包括Cache到内存）
+DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
+```
+
+对开发者的影响：
+- **常规场景**：
+  - 利用Write Buffer提升性能
+  - 自动缓存管理
+  
+- **关键场景**：
+  - DMA操作前：必须Clean Cache
+  - 多核共享数据：需要DMB+Cache维护
+  - 内存映射I/O：使用Device-nGnRnE内存类型
+
+# 补充
+
+<a id="Execute_never_supplement"></a>
+
+**XNTable / UXNTable / PXNTable 补充说明**<br>
+用于指示“**Execute-never (XN)**” 是 ARM 架构中的一个内存访问控制标志，用来控制特定内存页或块是否允许执行指令。它的意思是不可执行，也就是**禁止 CPU 在这块内存中执行指令**。
+
+具体理解如下：
+
+1. XN = 1（有效）
+
+     - 表示 “不可执行”。
+
+    - CPU 如果尝试在该内存页或块上执行指令，就会产生 异常 (Exception)，通常是 仿真环境下的执行中止 或 Data/Instruction Abort。
+
+1. XN = 0（无效）
+
+    - 表示 “可以执行”。
+
+    - CPU 可以在该内存页或块中正常执行指令。
+
+| 字段        | 有效值 = 0 的行为       | 有效值 = 1 的行为                                                                                                   |
+|-------------|-------------------------|---------------------------------------------------------------------------------------------------------------------|
+| XNTable      | 无影响                  | - 后续查找级别中的块描述符、页描述符的 XN 字段被强制视为 1<br>- 其他级别的 XNTable / XN 字段取值和解释不受影响           |
+| UXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 UXN 字段被强制视为 1<br>- 其他级别的 UXNTable / UXN 字段取值和解释不受影响         |
+| PXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 PXN 字段被强制视为 1<br>- 其他级别的 PXNTable / PXN 字段取值和解释不受影响         |
+
+
+<a id="sh_bit_meaning"></a>
+**Stage1 Shareability attributes**
+|SH[1:0]|Normal Memory|
+|-|-|
+|0b00|Non-Sharable|
+|0b01|Reserve|
+|0b10|Outer Shareable|
+|0b11|Inner Shareable|
+
+
+<a id="tcrel3_bit_meaning"></a>
+
+**TCR_EL3 BIT含义**
 
 +  Bits [63:44]
     - 保留，写 0（RES0）
@@ -545,349 +920,5 @@ TCR_EL3 是一个 64 位寄存器
     - **功能**：虚拟地址空间大小控制  
     - **公式**：`VA_size = 2^(64     - T0SZ)`  
     - **备注**：最小值依赖页粒度与扩展特性（如 LPA2、DS）
-
-##### 页表结构
-
-
-###### 页表类型
-在 arm64/cortex-A53下,`MMU`根据**颗粒度**大小(`granule`),将表分为多级，包括**Table**、**Block**(2MB)、**Page**(4KB).最终通过一个**虚拟地址**通过查表获取对应的**物理地址**(虚拟地址不同bit分区作为MMU Table的索引)
-| Descriptor Type | 描述 | 用途 | 映射大小 |
-|-----------------|------|------|----------|
-| Table           | 指向下一级页表的表格描述符 | 用于多级页表结构，链接到下一级表 | 不直接映射物理内存，指向下一级页表 |
-| Block           | 映射一段连续物理内存的块描述符 | 用于较大内存区域，直接映射，不进入下一级表 | Level 0: 512 GB<br>Level 1: 1 GB<br>Level 2: 2 MB |
-| Page            | 映射单个页面的页描述符 | 用于精细的页面映射 | 4 KB / 16 KB / 64 KB（取决于配置） |
-
-
-
-EL3_stage1 最多支持5级别页表,最后一个表为**block&page**
-
-
-<div style="text-align: center;">
-    <img src="mmu_stage1_part1.png" alt="stage1 4kb" width="70%" height="70%" />
-</div>
-<div style="text-align: center;">
-    <img src="translate_stage1_4kb.png" alt="stage1 4kb" width="70%" height="70%" />
-</div>
-<div style="text-align: center;">
-    <img src="mmu_stage1_part2.png" alt="stage1 4kb" width="70%" height="70%" />
-</div>
-
-**Table Descriptor Format**:
-
-<div style="text-align: center;">
-    <img src="table_descriptor.png" alt="stage1 4kb" width="70%" height="70%" />
-</div>
-
-
-
-| 位段         | 字段 / 值         | 条件 / 说明 |
-|--------------|-------------------|-------------|
-| [63]         | RES0 / NSTable     | 非安全状态为 RES0；安全状态为 NSTable。详见 *Hierarchical control of Secure or Non-secure memory accesses*。 |
-| [62:61]      | APTable[1:0]       | 启用层级权限时有效；若 `HCR_EL2.{NV,NV1}=={1,1}`，则 `APTable[0]=0`。详见 *Hierarchical control of data access Direct permissions*。 |
-| [60]         | XNTable / UXNTable / PXNTable | 在第1阶段（Stage 1）地址转换中，某一查找级别（lookup level）的页表项可以限制后续查找级别中使用直接权限（Direct permissions）所表达的指令执行控制 [XN详解](#Execute_never_supplement)|
-| [59]         | RES0 / PXNTable    | 启用层级权限时：单特权级或 EL1&0 且 `HCR_EL2.{NV,NV1}=={1,1}` 为 RES0；双特权级为 PXNTable。 |
-| [58:53]      | IGNORED            | 忽略。 |
-| [52]         | Protected / IGNORED| 当 `PnCH=1` 时为 Protected；否则忽略。详见 *Stage 1 Protected Attribute*。 |
-| [51]         | IGNORED            | 忽略。 |
-| [50]         | RES0               | 保留为 0。 |
-| [49:48]      | RES0 / NLTA[49:48] | 4KB/16KB 且 DS=0 或 64KB 粒度为 RES0；4KB/16KB 且 DS=1 为 NLTA[49:48]。 |
-| [47:12]      | NLTA[...]          | 4KB 粒度：NLTA[47:12]；16KB 粒度：NLTA[47:14]（bits[13:12] 为 RES0）；64KB 粒度：NLTA[47:16]（未实现 LPA）；64KB+LPA：NLTA[47:16]+NLTA[51:48]。 |
-| [11]         | IGNORED            | 忽略。 |
-| [10]         | Access flag (AF) / IGNORED | 硬件管理 AF 启用时为 Access flag，否则忽略。详见 *Hardware management of the Table descriptor Access Flag*。 |
-| [9:8]        | IGNORED / NLTA[51:50] | 4KB/16KB 且 DS=0 或 64KB 粒度为忽略；4KB/16KB 且 DS=1 为 NLTA[51:50]。 |
-| [7:2]        | IGNORED            | 忽略。 |
-| [1]          | Table descriptor   | 为 1 表示是表描述符（适用于 L3 以上）。 |
-| [0]          | Valid descriptor   | 为 1 表示描述符有效。 |
-
-
-
-**Block Descriptor Format**:
-
-<div style="text-align: center;">
-    <img src="table_descriptor_format.png" alt="stage1 4kb" width="70%" height="70%" />
-</div>
-<div style="text-align: center;">
-    <img src="table_descriptor_format2.png" alt="stage1 4kb" width="70%" height="70%" />
-</div>
-
-**Lower Attributes [0:1]**
-|Bits [1:0]	|Type	|Meaning|
-|-|-|-|
-|0b00|Invalid|这个页表项无效。如果 MMU 尝试访问这个条目，会触发一个 转换错误（translation fault）。通常用于表示未映射或无效的内存区域。|
-|0b01|Block or Page|这个页表项是一个 块（Block） 或 页（Page） 的描述符。这意味着地址转换在这里结束，页表项的其余部分直接包含了 物理地址 和 内存属性。|
-|0b10|Reserved|这个值被保留给未来的用途，如果 MMU 遇到这个值，也会触发一个转换错误。|
-|0b11|Table|这个值被保留给未来的用途，如果 MMU 遇到这个值，也会触发一个转换错误。|
-
-**Lower Attributes [2:15]**
-
-| 位范围    | 字段名       | 含义说明 |
-|-----------|--------------|----------|
-| [4:2]     | AttrIndx[2:0] | 内存属性索引，对应 MAIR_ELx，定义缓存策略和内存类型（Device/Normal） |
-| 5         | NS            | Non-secure bit：标记为安全世界或非安全世界（TrustZone） |
-| [7:6]     | AP[1:0]       | 访问权限：用户态/特权态，读/写 权限设置 |
-| [9:8]     | SH[1:0]       | 共享域设置：Non-shareable、Inner-shareable、Outer-shareable [bit详解](#sh_bit_meaning)|
-| 10        | AF            | Access Flag：是否已访问（硬件/软件置位） |
-| 11        | nG            | not-Global：设置是否是全局页，影响 TLB 是否与 ASID 绑定 |
-| [15:12]   | OA[51:48]     | 输出物理地址高位部分（配合页基地址） |
-
-
-**Upper Attributes [50:63]**
-
-| 位范围    | 字段名            | 含义说明 |
-|-----------|-------------------|----------|
-| 50        | GP                | Guarded Page（或其他特殊用途，常忽略） |
-| 51        | Reserved          | 保留位 |
-| 52        | DBM / PI[1]       | Dirty Bit Modify 支持，用户态可写标志 |
-| 53        | Contiguous        | 支持页连续优化，用于 TLB 合并 |
-| 54        | PXN / PI[2]       | Privileged Execute Never：禁止 EL1 执行 |
-| 55        | UXN / PI[3]       | Unprivileged Execute Never：禁止 EL0 执行 |
-| [58:56]   | Reserved/Software | 供软件使用或保留 |
-| 59        | PBHA[0] / AttrIndx[3] | Page Based Hardware Attributes，平台相关 |
-| [62:60]   | PBHA[3:1] / POIndex[2:0] | 同上，QoS / Cache Hint 用 |
-| 63        | AMEC              | Allocation Management Enable Code，硬件或平台使用 |
-
-###### 特权与非特权
-| 术语               | 中文含义  | 描述                       |
-| ---------------- | ----- | ------------------------ |
-| **Privileged**   | 特权模式  | 操作系统核心、驱动代码运行的模式，权限最高    |
-| **Unprivileged** | 非特权模式 | 用户态程序运行的模式，权限受限，不能直接访问硬件 |
-
-| EL级别 | 运行模式           | 典型用途           | 是否特权模式            |
-| ---- | -------------- | -------------- | ----------------- |
-| EL3  | Secure Monitor | TrustZone 安全监控 | ✅ 是               |
-| EL2  | Hypervisor     | 虚拟化支持          | ✅ 是               |
-| EL1  | Kernel / OS    | 操作系统内核         | ✅ 是               |
-| EL0  | User Space     | 应用程序           | ❌ 否（Unprivileged） |
-
-
-| 对比项             | Unprivileged (EL0) | Privileged (EL1+) |
-| --------------- | ------------------ | ----------------- |
-| 是否能访问系统寄存器      | ❌ 否                | ✅ 是               |
-| 是否能修改页表或MMU     | ❌ 否                | ✅ 是               |
-| 是否能执行异常处理       | ❌ 否                | ✅ 是               |
-| 是否可执行SVC（软件中断）  | ✅ 可以请求服务           | ✅ 可以处理            |
-| 是否可执行 `WFI/WFE` | ❌ 否                | ✅ 是               |
-| 能否开启/关闭中断       | ❌ 否                | ✅ 是               |
-| 常见用途            | 用户程序（shell、APP）    | 内核、驱动、异常处理等       |
-
-
-总结一句话：
-Privileged 是“特权态”用于操作系统和核心控制逻辑；Unprivileged 是“用户态”，用于运行用户应用，受到严格限制，防止破坏系统稳定性。
-
-在**ARM64**上:
-
-- TTBR0_EL1: 指向**用户**空间**页表基地址**
-- TTBR1_EL1: 指向**内核**空间**页表基地址**
-- 每个进程都有自己的**用户空间页表**(`TTBR0`)
-- 所有进程共享同一个**内核页表**(`TTBR1`)
-
-##### linux相关操作
-
-Linux 通常采用四级页表结构:
-
-- PGD (Page Global Directory)
-- PUD (Page Upper Directory)
-- PMD (Page Middle Directory)
-- PTE (Page Table Entry)
-
-```c
-页表切换过程
-switch_mm() {
-    // 1. 获取新进程的页表基地址
-    pgd = next->mm->pgd;
-    
-    // 2. 切换TTBR0寄存器
-    write_ttbr0(pgd);
-    
-    // 3. 刷新TLB
-    flush_tlb_local();  // 清除旧进程的TLB项
-    
-    // 4. 更新ASID(Address Space ID)
-    if (prev_asid != next_asid) {
-        update_asid(next_asid);
-    }
-}
-
-```
-内存管理的关键概念：
-
-- 每个进程有独立的虚拟地址空间
-- 内核空间在所有进程中映射相同
-- 使用ASID来避免切换时完全刷新TLB
-- 页表项包含访问权限、缓存属性等标志位
-
-
-
-### CPU访问流程
-
-**CPU取指令阶段:**
-
-
-CPU首先获取程序计数器(PC)中的**虚拟地址**
-这个**虚拟地址**需要被转换为物理地址才能访问实际的内存
-
-
-地址转换过程:
-
-- 首先检查`TLB(Translation Lookaside Buffer)`:
-
-    - CPU会先查找TLB缓存
-    - TLB条目包含`ASID(Address Space ID)`和虚拟地址到物理地址的映射
-    - `ASID`用于区分不同进程的地址空间,避免TLB刷新
-    - 如果找到匹配的`TLB`条目(`TLB hit`),直接使用缓存的物理地址
-
--  TLB未命中时的页表遍历:
-
-    - CPU读取`TTBR(Translation Table Base Register)`获取页表基地址
-    - 对于ARM架构通常是两级页表结构
-    - 使用虚拟地址的不同位段索引页表
-    - 最终得到物理页框号(PFN)
-
-
-**Cache访问:**
-
-
-得到物理地址后,先检查Cache
-- 现代CPU通常采用`VIPT(Virtually Indexed Physically Tagged)Cache`
-- Cache使用虚拟地址的低位作为索引,物理地址作为Tag
-- 如果Cache命中,直接返回数据
-- Cache缺失则需要访问内存
-
-
-**实际执行过程中的优化:**
-
-
-- CPU会进行指令预取,填充指令Cache
-- 分支预测会提前计算可能用到的地址
-- MMU包含micro-TLB专门用于指令地址转换
-- Cache和TLB并行查询以提高性能
-
-**这个过程涉及几个关键组件的协同工作:**
-
-- ASID确保每个进程有独立的地址空间视图
-- TTBR指向当前进程的页表结构
-- TLB缓存最近使用的地址转换结果
-- Cache系统隐藏内存访问延迟
-
-**当进程切换时:**
-
-- 需要更新TTBR指向新进程的页表
-- 可能需要刷新TLB(除非使用ASID)
-- Context Switch会影响Cache性能
-
-**这些机制共同保证了虚拟内存的正确性和性能。每个组件都针对特定问题提供优化:**
-
-- ASID解决进程隔离问题
-- TLB解决地址转换速度问题
-- Cache解决内存访问延迟问题
-
-
-MMU中可配置cache属性。某块RAM配置了cacheable属性，若存放了指令，则会使用Icache，若触发了访问，则会使用Dcache。
-
-
-### 数据读写流向
-
-```mermaid
-flowchart TD
-    A[CPU执行STR指令] --> B[数据写入Write Buffer]
-    B --> C{是否有DMB指令?}
-    C -->|是| D[等待Write Buffer清空到Cache]
-    C -->|否| E[CPU继续执行后续指令]
-    D --> F[L1 Cache]
-    E --> F
-    F --> G[L2 Cache]
-    G --> H[主存RAM]
-    H --> I{是否Cache清理?}
-    I -->|是| J[数据持久化存储]
-    I -->|否| G
-```
-
-数据流向说明：
-
-- **CPU执行STR指令阶段**：
-  - 数据首先进入Write Buffer（合并缓冲区）
-  - 处理器继续执行后续指令（非阻塞）
-  - 写操作完成状态立即对当前CPU可见
-
-- **Write Buffer到Cache阶段**：
-  - 异步写入L1 D-Cache（由硬件调度）
-  - 写入策略：
-    - 默认：合并相邻写操作（Write Merging）
-    - 遇到DMB指令：强制排空Write Buffer
-    - 遇到DSB指令：确保数据到达目标存储位置
-
-- **Cache层级同步**（Write-Back策略）：
-  ```mermaid
-  flowchart LR
-    L1D-->|Eviction|L2
-    L2-->|Eviction|L3
-    L3-->|Eviction|RAM
-  ```
-  - 触发条件：
-    - Cache替换策略触发（LRU等）
-    - 显式Clean/Invalidate操作
-    - 一致性协议请求（如多核间缓存一致性）
-
-带内存屏障的写操作：
-```c
-STR R1, [R0]    // 1. 数据进入Write Buffer
-DMB             // 2. 确保所有存储操作在继续前完成
-                // 3. 清空Write Buffer到L1 D-Cache
-```
-
-
-带Cache清理的写操作：
-```c
-STR R1, [R0]    // 1. 数据进入Write Buffer
-DSB             // 2. 等待所有存储完成（包括Cache到内存）
-DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
-```
-
-对开发者的影响：
-- **常规场景**：
-  - 利用Write Buffer提升性能
-  - 自动缓存管理
-  
-- **关键场景**：
-  - DMA操作前：必须Clean Cache
-  - 多核共享数据：需要DMB+Cache维护
-  - 内存映射I/O：使用Device-nGnRnE内存类型
-
-# 补充
-
-<a id="Execute_never_supplement"></a>
-
-**XNTable / UXNTable / PXNTable 补充说明**<br>
-用于指示“**Execute-never (XN)**” 是 ARM 架构中的一个内存访问控制标志，用来控制特定内存页或块是否允许执行指令。它的意思是不可执行，也就是**禁止 CPU 在这块内存中执行指令**。
-
-具体理解如下：
-
-1. XN = 1（有效）
-
-     - 表示 “不可执行”。
-
-    - CPU 如果尝试在该内存页或块上执行指令，就会产生 异常 (Exception)，通常是 仿真环境下的执行中止 或 Data/Instruction Abort。
-
-1. XN = 0（无效）
-
-    - 表示 “可以执行”。
-
-    - CPU 可以在该内存页或块中正常执行指令。
-
-| 字段        | 有效值 = 0 的行为       | 有效值 = 1 的行为                                                                                                   |
-|-------------|-------------------------|---------------------------------------------------------------------------------------------------------------------|
-| XNTable      | 无影响                  | - 后续查找级别中的块描述符、页描述符的 XN 字段被强制视为 1<br>- 其他级别的 XNTable / XN 字段取值和解释不受影响           |
-| UXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 UXN 字段被强制视为 1<br>- 其他级别的 UXNTable / UXN 字段取值和解释不受影响         |
-| PXNTable     | 无影响                  | - 后续查找级别中的块描述符、页描述符的 PXN 字段被强制视为 1<br>- 其他级别的 PXNTable / PXN 字段取值和解释不受影响         |
-
-
-<a id="sh_bit_meaning"></a>
-**Stage1 Shareability attributes**
-|SH[1:0]|Normal Memory|
-|-|-|
-|0b00|Non-Sharable|
-|0b01|Reserve|
-|0b10|Outer Shareable|
-|0b11|Inner Shareable|
-
+    - 
 # 总结
