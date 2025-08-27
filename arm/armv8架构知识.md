@@ -214,12 +214,11 @@ ARMv8 64 位地址翻译，最多 4 级页表，每级映射 9bit 地址空间�
 **算法：**
 
 1. 确定虚拟地址位数：**VA_bits = 64 - T0SZ（TCR_ELx.T0SZ）**
+2. 每级页表提供 **9bit** × **页表基本寻址单元** 大小的寻址空间
+3. 64位架构，一个页表项占8byte空间，一个页表占**512×8Byte**空间
+4. 页大小由 [TGX](#register_tcr_tg0) 决定（4KB = 12bit offset）
 
-2. 每级页表提供 **9bit** → 映射空间 9 * N 位
-
-3. 页大小由 TGx 决定（4KB = 12bit offset）
-
-4. 公式：
+5. 公式：
     ```ini
       N = ceil((VA_bits - page_offset_bits) / 9)
       page_offset_bits = 12 (4KB), 14 (16KB), 16 (64KB)
@@ -930,7 +929,7 @@ DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
     - **复位行为**：热复位未知
 
 
-
+<a id="register_tcr_tg0"></a>
 +  TG0，bits [15:14]
     - **功能**：TTBR0_EL3 页粒度  
     - **取值**：
