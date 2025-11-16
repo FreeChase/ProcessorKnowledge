@@ -1,5 +1,47 @@
 
 ---
+- [前言](#前言)
+- [一、GCC](#一gcc)
+  - [ARM](#arm)
+    - [语法](#语法)
+      - [marco](#marco)
+      - [rept](#rept)
+      - [section](#section)
+      - [.extern](#extern)
+      - [.set](#set)
+      - [.align](#align)
+      - [.org](#org)
+    - [专业名词](#专业名词)
+      - [Post-index](#post-index)
+      - [Pre-Index](#pre-index)
+    - [指令](#指令)
+      - [adr\_l](#adr_l)
+      - [move](#move)
+      - [STP](#stp)
+      - [DC](#dc)
+      - [DMB(Data Memory Barrier)](#dmbdata-memory-barrier)
+      - [LDMIA(Load Multiple Increment After)](#ldmiaload-multiple-increment-after)
+      - [STMIA(Store Multiple Increment After)](#stmiastore-multiple-increment-after)
+      - [LDXR](#ldxr)
+      - [STXR](#stxr)
+    - [启动过程](#启动过程)
+      - [main、\_main、\_start](#main_main_start)
+  - [MicroBlaze](#microblaze)
+    - [惯例](#惯例)
+      - [stack pointer( r0 )](#stack-pointer-r0-)
+      - [stack pointer( r1 )](#stack-pointer-r1-)
+      - [中断向量表](#中断向量表)
+    - [语法](#语法-1)
+      - [la](#la)
+      - [sw](#sw)
+      - [lhu](#lhu)
+      - [shi](#shi)
+- [二、IAR](#二iar)
+      - [汇编](#汇编)
+      - [扩展内联汇编](#扩展内联汇编)
+      - [IAR汇编帮助文档](#iar汇编帮助文档)
+- [三、KEIL](#三keil)
+- [四、链接脚本](#四链接脚本)
 
 
 
@@ -323,20 +365,38 @@ r5 递增 16（每个寄存器 4 字节，4 个寄存器 = 16 字节）。
 
 `r5` = 0x2000，指向目标地址 0x2000。
 寄存器数据如下：
-ini
-复制
-编辑
-`r7  = 0xAAAAAAA1
-r8  = 0xBBBBBBB2
-r9  = 0xCCCCCCC3
-r10 = 0xDDDDDDD4`
-执行 `STMIA r5!, {r7 - r10}`：
 
-`r7 → [0x2000] = 0xAAAAAAA1`
-`r8 → [0x2004] = 0xBBBBBBB2`
-`r9 → [0x2008] = 0xCCCCCCC3`
-`r10 → [0x200C] = 0xDDDDDDD4`
-`r5 = r5 + 16 = 0x2010`（地址递增 16）
+r7  = 0xAAAAAAA1<br>
+r8  = 0xBBBBBBB2<br>
+r9  = 0xCCCCCCC3<br>
+r10 = 0xDDDDDDD4<br>
+执行 `STMIA r5!, {r7 - r10}`：<br>
+
+r7 → [0x2000] = 0xAAAAAAA1<br>
+r8 → [0x2004] = 0xBBBBBBB2<br>
+r9 → [0x2008] = 0xCCCCCCC3<br>
+r10 → [0x200C] = 0xDDDDDDD4<br>
+`r5 = r5 + 16 = 0x2010`（地址递增 16）<br>
+
+
+#### LDXR
+#### STXR
+
+Armv8 使用同步原语提供共享内存的非阻塞同步。本节中关于同步原语的内存访问信息，适用于对**普通内存**（Normal memory）和任何类型的**设备内存**（Device memory）的访问
+
+ <div align="center">
+<img src="image/A64_LDXRSTXR.png " width="100%">
+<p>图片.LDXR STXR</p>
+</div>
+
+除显示`CLREX`指令的那一行外，单行中的两条指令是一对独占加载/独占存储指令。一对独占加载/独占存储指令访问一个非中止的内存地址`x`的模型是：
+
+- 独占加载指令从内存地址`x`读取一个值。
+
+- 相应的独占存储指令只有在**没有其他观察者**、**进程**或**线程**对地址`x`执行了**更近期的存储**时，才能成功地写入该内存地址。独占存储指令返回一个状态位，该状态位指示写内存操作是否成功。
+
+`Load-Exclusive`指令会**标记**一小块内存用于独占访问。被标记的内存块大小是由具体实现决定的（IMPLEMENTATION DEFINED）。对被标记内存块中任何地址执行的`Store-Exclusive`指令都会清除该**标记**。
+
 ### 启动过程
 
 #### main、_main、_start
