@@ -23,6 +23,9 @@
         - [页表颗粒度2MB和4KB有什么差异](#页表颗粒度2mb和4kb有什么差异)
     - [CPU访问流程](#cpu访问流程)
     - [数据读写流向](#数据读写流向)
+- [cortex-M3](#cortex-m3)
+    - [寄存器：](#寄存器-1)
+      - [常用寄存器：](#常用寄存器-1)
 - [补充](#补充)
 - [总结](#总结)
 
@@ -42,6 +45,15 @@
  <div align="center">
 <img src="https://i-blog.csdnimg.cn/blog_migrate/b1fc04393ed25e121a5504a41e57c73d.png" width="70%">
 <p>图片1.通用寄存器</p>
+</div>
+
+ - LR寄存器(`LR`)
+  
+    通常由X30担任
+
+ <div align="center">
+<img src="image/AARCH64_LR.png" width="70%">
+<p>图片2.SP寄存器</p>
 </div>
 
  - 栈指针寄存器(`SP`)
@@ -675,6 +687,21 @@ DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
   - DMA操作前：必须Clean Cache
   - 多核共享数据：需要DMB+Cache维护
   - 内存映射I/O：使用Device-nGnRnE内存类型
+
+
+
+# cortex-M3
+
+### 寄存器：
+#### 常用寄存器：
+
+- R0～R12：通用寄存器
+
+- R13：`SP`（`Stack Pointer`）栈指针
+
+- R14：`LR`（`Link Register`）返回地址寄存器
+
+- R15：`PC`（`Program Counter`）程序计数器
 
 # 补充
 
