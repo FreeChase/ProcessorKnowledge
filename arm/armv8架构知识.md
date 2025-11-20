@@ -146,6 +146,8 @@ __asm__ volatile(
 
 由 DescriptorTable_Page中的`AttrIndex[4:2]`作为索引，然后查找此寄存器确认
 
+[memory属性策略详解](./subnote/MAIR_memory策略详解.md)
+
 ## 原子性操作：
 
  - 对齐的LDR、STR为single-copy atomic
