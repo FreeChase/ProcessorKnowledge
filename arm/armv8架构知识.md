@@ -5,7 +5,8 @@
 - [aarch64](#aarch64)
     - [寄存器：](#寄存器)
       - [常用寄存器：](#常用寄存器)
-    - [cache功能项：](#cache功能项)
+      - [cache功能项：](#cache功能项)
+      - [内存属性配置（MAIR\_EL3）](#内存属性配置mair_el3)
   - [原子性操作：](#原子性操作)
   - [中断机制](#中断机制)
     - [`Cortex-A9`：](#cortex-a9)
@@ -120,7 +121,7 @@ __asm__ volatile(
 <p>图片4.SIMD&FP寄存器</p>
 </div>
 
-### cache功能项：
+#### cache功能项：
  - Cache type寄存器(`Cache Type Register`)
 主要功能如下：
 	- 任何受指令缓存维护指令影响的指令缓存的最小行长度。
@@ -132,6 +133,18 @@ __asm__ volatile(
 <img src="https://i-blog.csdnimg.cn/direct/649cf80d20ba44e8953ad1b49f197a99.png" width="100%">
 <p>图片5.cache type 寄存器</p>
 </div>
+
+
+#### 内存属性配置（MAIR_EL3）
+
+ <div align="center">
+<img src="image/AARCH64_MAIR.png" width="100%">
+<p>MAIR寄存器描述</p>
+</div>
+
+此表提供了MMU_Page关于Memory的**属性策略**(比如write-back、write-through、Device、Normal Memory等策略)。
+
+由 DescriptorTable_Page中的`AttrIndex[4:2]`作为索引，然后查找此寄存器确认
 
 ## 原子性操作：
 
