@@ -14,6 +14,8 @@
     - [专业名词](#专业名词)
       - [Post-index](#post-index)
       - [Pre-Index](#pre-index)
+        - [write-back](#write-back)
+        - [non-write-back](#non-write-back)
     - [指令](#指令)
       - [adr\_l](#adr_l)
       - [move](#move)
@@ -173,17 +175,29 @@ ldr x0, [x1], #4
 #### Pre-Index
 `Pre-indexing` 是一种内存地址计算方式，与 Post-indexing 相对，它表示在访问内存之前将索引添加到基地址。在ARM汇编语言中，Pre-indexing通常与加载（Load）和存储（Store）指令一起使用。
 
-以下是一个使用 Pre-indexing 进行加载操作的 ARM 汇编代码示例：
+pre-index，可以分为两种使用形式：
+1. 预索引写回(write-back)
+2. 预索引不写回
+
+##### write-back
+
 
 ```c
 ldr x0, [x1, #4]!
 ```
 在这个例子中：
 
-ldr 是 Load 指令，用于从内存中加载数据到寄存器。
-x0 是目标寄存器，用于存储加载的数据。
-[x1, #4]! 是 Pre-indexing 寻址模式。它表示将 x1 的值增加 4 个字节（32位）后，再从存储器地址 x1 处加载数据到 x0。
-这个指令的效果是，在访问内存之前，将 x1 的值增加 4，然后加载这个新地址处的数据到 x0。
+ldr 是 Load 指令，用于从内存中加载数据到寄存器。<br>
+x0 是目标寄存器，用于存储加载的数据。<br>
+[x1, #4]! 是 Pre-indexing 寻址模式。它表示x1=x1+4，再x0=[x1]。
+
+##### non-write-back
+
+```c
+ldr x0, [x1, #4]
+```
+在这个例子中：
+它表示x0=[x1+4]，但是x1不会加4。
 
 ---
 

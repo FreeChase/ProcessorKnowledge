@@ -3,9 +3,10 @@
 
 - [前言](#前言)
 - [aarch64](#aarch64)
-  - [寄存器：](#寄存器)
-    - [常用寄存器：](#常用寄存器)
-    - [cache功能项：](#cache功能项)
+    - [寄存器：](#寄存器)
+      - [常用寄存器：](#常用寄存器)
+      - [cache功能项：](#cache功能项)
+      - [内存属性配置（MAIR\_EL3）](#内存属性配置mair_el3)
   - [原子性操作：](#原子性操作)
   - [中断机制](#中断机制)
     - [`Cortex-A9`：](#cortex-a9)
@@ -37,6 +38,7 @@
 - [补充](#补充)
 - [总结](#总结)
 
+
 ---
 
 # 前言
@@ -53,6 +55,15 @@
  <div align="center">
 <img src="https://i-blog.csdnimg.cn/blog_migrate/b1fc04393ed25e121a5504a41e57c73d.png" width="70%">
 <p>图片1.通用寄存器</p>
+</div>
+
+ - LR寄存器(`LR`)
+  
+    通常由X30担任
+
+ <div align="center">
+<img src="image/AARCH64_LR.png" width="70%">
+<p>图片2.SP寄存器</p>
 </div>
 
  - 栈指针寄存器(`SP`)
@@ -112,7 +123,7 @@ __asm__ volatile(
 <p>图片4.SIMD&FP寄存器</p>
 </div>
 
-### cache功能项：
+#### cache功能项：
  - Cache type寄存器(`Cache Type Register`)
 主要功能如下：
 	- 任何受指令缓存维护指令影响的指令缓存的最小行长度。
@@ -124,6 +135,20 @@ __asm__ volatile(
 <img src="https://i-blog.csdnimg.cn/direct/649cf80d20ba44e8953ad1b49f197a99.png" width="100%">
 <p>图片5.cache type 寄存器</p>
 </div>
+
+
+#### 内存属性配置（MAIR_EL3）
+
+ <div align="center">
+<img src="image/AARCH64_MAIR.png" width="100%">
+<p>MAIR寄存器描述</p>
+</div>
+
+此表提供了MMU_Page关于Memory的**属性策略**(比如write-back、write-through、Device、Normal Memory等策略)。
+
+由 DescriptorTable_Page中的`AttrIndex[4:2]`作为索引，然后查找此寄存器确认
+
+[memory属性策略详解](./subnote/MAIR_memory策略详解.md)
 
 ## 原子性操作：
 
@@ -730,6 +755,7 @@ DC CIVAC, X0    // 3. 清理并无效化Cache行（ARMv8指令）
   - DMA操作前：必须Clean Cache
   - 多核共享数据：需要DMB+Cache维护
   - 内存映射I/O：使用Device-nGnRnE内存类型
+
 
 ## cache
 
