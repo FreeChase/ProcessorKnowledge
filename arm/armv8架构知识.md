@@ -8,6 +8,10 @@
       - [cache功能项：](#cache功能项)
       - [内存属性配置（MAIR\_EL3）](#内存属性配置mair_el3)
   - [原子性操作：](#原子性操作)
+  - [独占访问](#独占访问)
+    - [LDXR/STXR](#ldxrstxr)
+      - [多个`LDXR`会发生什么](#多个ldxr会发生什么)
+      - [程序里面使用LDXR，中断里面也使用LDXR，会怎样](#程序里面使用ldxr中断里面也使用ldxr会怎样)
   - [中断机制](#中断机制)
     - [`Cortex-A9`：](#cortex-a9)
     - [`Cortex-A53`：](#cortex-a53)
@@ -162,7 +166,88 @@ __asm__ volatile(
    - 不保证两个8字节操作的原子顺序
    - 适用于：流式数据操作、非关键数据块拷贝
    - 示例：`LDNP Q0, Q1, [X2]` / `STNP Q0, Q1, [X3]`
+## 独占访问
 
+### LDXR/STXR
+  LDXR/STXR成对使用。
+  `Load-Exclusive`指令会将一小块内存标记为独占访问状态。
+该被标记内存块的大小是实现定义的（IMPLEMENTATION DEFINED），详见
+"Marking and the size of the marked memory block"（B2-231 页）。
+
+对被标记内存块中任意地址执行的`Store-Exclusive`指令，都会清除该独占标记。
+> 对每个 PE（CPU 核）来说，架构上只定义“一个本地独占监视器（local exclusive monitor）”。
+同一时刻，只能有“一个有效的 LDXR 独占标记”。
+
+
+#### 多个`LDXR`会发生什么
+
+- 情况1 连续对不同地址 LDXR
+  ```c
+  ldxr x0, [addr1]
+  ldxr x1, [addr2]
+  ```
+
+  👉 第二个 LDXR 会覆盖第一个
+
+  结果：
+
+  monitor 只记住 addr2（或其 block）
+
+  addr1 的独占状态已经丢失
+
+- 情况2 想用一个 STXR 配对第一个 LDXR
+  ```c
+  ldxr x0, [addr1]
+  ldxr x1, [addr2]
+  stxr w2, w3, [addr1]   // ❌
+  ```
+
+  结果：
+
+  local monitor 不匹配
+
+  STXR 一定失败（返回 1）
+> 所以LDXR/STXR之间的代码一定要短快
+
+#### 程序里面使用LDXR，中断里面也使用LDXR，会怎样
+
+**结果**：不会异常。
+
+但：中断里的`LDXR`会破坏被中断代码的独占状态，
+导致外层那次`STXR`大概率失败。
+不过失败也是复合预期的行为，所以失败了要重新执行`LDXR->STXR`，不能单`STXR`。
+
+ARM 架构文档多次强调：
+
+- Exclusive sequence 应该是 short and simple
+
+- 不保证 monitor 长期存在
+
+- 不保证跨异常有效
+```asm
+// LDXR/STXR 正确模板：
+1:
+    ldxr    w0, [addr]
+    ; 判断 w0
+    stxr    w1, w2, [addr]
+    cbnz    w1, 1b      // 失败就重试
+
+```
+
+**内核常见做法**
+```c
+spin_lock_irqsave(&lock, flags);
+```
+
+**等价于**：
+
+- 关本地中断
+
+- 防止中断里再用同一把锁
+
+- 缩短 exclusive 窗口
+
+- 提高 STXR 成功率
 ## 中断机制
 
 ```c
